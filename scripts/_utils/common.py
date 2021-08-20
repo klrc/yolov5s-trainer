@@ -85,10 +85,10 @@ class Focus(nn.Module):
         conv.weight = torch.nn.Parameter(weight, requires_grad=False)
         return conv
 
-    def forward(self, x):
-        return self.conv(torch.cat([x[..., ::2, ::2], x[..., 1::2, ::2], x[..., ::2, 1::2], x[..., 1::2, 1::2]], 1))
+    # def forward(self, x):
+    #     return self.conv(torch.cat([x[..., ::2, ::2], x[..., 1::2, ::2], x[..., ::2, 1::2], x[..., 1::2, 1::2]], 1))
 
-    def dspforward(self, x):
+    def forward(self, x):
         return self.conv(self.focus(x))
 
 
