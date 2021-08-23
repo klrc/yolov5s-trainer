@@ -352,6 +352,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
             if do_prune:
                 print('fitness not increasing any more, trigger FPGM pruning..')
                 mask = prune(model, device=device)
+                fpgm_counter.max = 0
 
         # Test mode
         if opt.test:
