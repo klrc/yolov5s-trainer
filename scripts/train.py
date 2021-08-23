@@ -58,7 +58,6 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
     # Directories
     w = save_dir / 'weights'  # weights dir
     w.mkdir(parents=True, exist_ok=True)  # make dir
-    last, best = w / 'last.pt', w / 'best.pt'
 
     # Hyperparameters
     if isinstance(hyp, str):
@@ -331,6 +330,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         loggers.on_train_val_end(mloss, results, lr, epoch, best_fitness, fi)
 
         # Save model
+        last, best = w / f'{epoch}.pt', w / 'best.pt'
         if (not nosave) or (final_epoch and not evolve):  # if save
             ckpt = {'epoch': epoch,
                     'best_fitness': best_fitness,
