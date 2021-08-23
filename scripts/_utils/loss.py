@@ -148,9 +148,7 @@ class ComputeLoss:
                 # Classification
                 if self.nc > 1:  # cls loss (only if multiple classes)
                     pcls = ps[:, 5:]
-                    onehot = torch.zeros_like(pcls, device=device)
-                    pcls_values, pcls_indices = pcls.max(1)
-                    onehot[pcls_indices] += pcls_values
+                    onehot = torch.softmax(pcls, dim=1)
 
                     target_classes = [0, 1, 2, 3, 5, 7]
                     bg_classes = [_c for _c in range(80) if _c not in target_classes]

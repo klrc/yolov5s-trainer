@@ -336,7 +336,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                     'best_fitness': best_fitness,
                     'model': deepcopy(de_parallel(model)).half(),
                     'optimizer': optimizer.state_dict(),
-                    'fpgm_mask': mask,
+                    'fpgm_mask': None if not opt.fpgm else mask,
                     'wandb_id': loggers.wandb.wandb_run.id if loggers.wandb else None}
 
             # Save last, best and delete
