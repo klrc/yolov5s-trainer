@@ -5,7 +5,7 @@ import torch
 if __name__ == '__main__':
 
     device = 'cpu'
-    weights = 'prototype/ancient.pt'
+    weights = 'runs/train/exp35/weights/last.pt'
 
     # Model
     model = Xyolov5s().to(device)  # create
