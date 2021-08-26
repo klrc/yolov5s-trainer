@@ -97,8 +97,6 @@ class ComputeLoss:
         h = model.hyp  # hyperparameters
 
         # Define criteria
-        self.alpha = 0.1
-        self.beta = 0
         BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['cls_pw']], device=device))
         BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['obj_pw']], device=device))
 
@@ -147,18 +145,10 @@ class ComputeLoss:
 
                 # Classification
                 if self.nc > 1:  # cls loss (only if multiple classes)
-                    pcls = ps[:, 5:]
-                    onehot = torch.softmax(pcls, dim=1)
-
-                    target_classes = [0, 1, 2, 3, 5, 7]
-                    bg_classes = [_c for _c in range(80) if _c not in target_classes]
-                    t = torch.full_like(pcls, self.cn, device=device)  # targets
+                    t = torch.full_like(ps[:, 5:], self.cn, device=device)  # targets
                     t[range(n), tcls[i]] = self.cp
 
-                    lcls += self.BCEcls(pcls[target_classes], t[target_classes])  # BCE-target
-                    lcls += self.beta * self.BCEcls(onehot[target_classes], t[target_classes])  # BCE-target-onehot
-                    lcls += self.alpha * self.BCEcls(pcls[bg_classes], t[bg_classes])  # BCE-background
-                    lcls += self.alpha * self.beta * self.BCEcls(onehot[bg_classes], t[bg_classes])  # BCE-background-onehot
+                    lcls += self.BCEcls(ps[:, 5:], t)  # BCE-target
 
                 # Append targets to text file
                 # with open('targets.txt', 'a') as file:

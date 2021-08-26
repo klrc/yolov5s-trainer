@@ -17,13 +17,13 @@ warmup_momentum: 0.5
 warmup_bias_lr: 0.05
 box: 0.0296
 cls: 0.243
-cls_pw: 0.9
+cls_pw: 0.66
 obj: 0.301
 obj_pw: 0.911
 iou_t: 0.2
 anchor_t: 2.91
 # anchors: 3.63
-fl_gamma: 1.5
+fl_gamma: 0
 hsv_h: 0.0138
 hsv_s: 0.664
 hsv_v: 0.464

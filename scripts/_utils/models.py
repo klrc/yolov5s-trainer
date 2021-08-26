@@ -85,8 +85,8 @@ class Xyolov5s(nn.Module):
 
     def dsp(self):
         for m in self.modules():
-            if type(m) is Focus:
-                m.forward = m.dspforward  # update forward
+            # if type(m) is Focus:
+            #     m.forward = m.dspforward  # update forward
             if type(m) is Detect:
                 m.forward = m.dspforward  # update forward
         return self

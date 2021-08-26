@@ -20,32 +20,33 @@ import types
 from torchvision.models.resnet import resnet18
 
 
-    
-def _locate_zeroized(conv):
+def _locate_zeroized(conv, zero_inputs):
     num_filters = conv.weight.size(0)
-    zero_mask = (conv.weight.data.view(num_filters, -1).abs().sum(dim=1) == 0)
+    zero_mask = conv.weight.data[:, ~zero_inputs, ...]
+    zero_mask = zero_mask.view(num_filters, -1).abs().sum(dim=1) == 0
     return zero_mask
+
 
 def _fix_all_seed(seed=0):
     random.seed(seed)
     np.random.seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-    
+
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    
-    # Remove randomness (may be slower on Tesla GPUs) 
+
+    # Remove randomness (may be slower on Tesla GPUs)
     # https://pytorch.org/docs/stable/notes/randomness.html
     if seed == 0:
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
 
-def melt(model:nn.Module, verbose=True): 
+def melt(model: nn.Module, verbose=True):
 
-    _fix_all_seed(0)
+    # _fix_all_seed(0)
 
     modules = {}
     target_layers = []
@@ -78,13 +79,12 @@ def melt(model:nn.Module, verbose=True):
                 'is_sensitive': hasattr(layer, 'in_channels') or hasattr(layer, 'num_features') or hasattr(layer, 'in_features'),
                 'has_weight': hasattr(layer, 'weight') and layer.weight is not None,
                 'has_bias': hasattr(layer, 'bias') and layer.bias is not None,
-                'zero_filters': None if type(layer) != nn.Conv2d else _locate_zeroized(layer),
+                'zero_filters': None,
                 'zero_inputs': None,
             }
             if type(layer) in (nn.Conv2d, nn.ReLU, nn.BatchNorm2d, nn.Linear):
                 target_layers.append(layer)
 
-    
     # disable relu
     relu_backup = []
     for layer in target_layers:
@@ -94,7 +94,6 @@ def melt(model:nn.Module, verbose=True):
             layer_name = layer._meta['layer_name']
             replace_layer(module_name, layer_name, nn.Identity())
             print_if_verbose(f'disable relu {get_layer_name(layer)}')
-
 
     # disable bias
     for layer in target_layers:
@@ -111,6 +110,8 @@ def melt(model:nn.Module, verbose=True):
         layer._meta['zero_inputs'] = zero_inputs
         if type(layer) == nn.BatchNorm2d:
             layer._meta['zero_filters'] = zero_inputs
+        elif type(layer) == nn.Conv2d:
+            layer._meta['zero_filters'] = _locate_zeroized(layer, zero_inputs)
         print_if_verbose(f'{torch.count_nonzero(zero_inputs)} dead inputs detected for layer {get_layer_name(layer)}')
         return input
 
@@ -119,16 +120,16 @@ def melt(model:nn.Module, verbose=True):
         if layer._meta['is_sensitive']:
             handle = layer.register_forward_pre_hook(pre_hook)
             _hooks.append(handle)
-    
-    # forward with random input(s)
+
+    # forward with random input(s) (to trace zero inputs & update zero filters for conv)
     x = torch.rand(4, 3, 224, 224)
     print_if_verbose(f'tracing with random input {x.size()}')
     _ = model(x)
-    
+
     # clean hooks
     for handle in _hooks:
         handle.remove()
-    
+
     # recover relu
     for layer in relu_backup:
         module_name = layer._meta['module_name']
@@ -142,12 +143,12 @@ def melt(model:nn.Module, verbose=True):
         zero_filters = layer._meta['zero_filters']
         zero_inputs = layer._meta['zero_inputs']
         if type(layer) is nn.BatchNorm2d:  # clean batchnorm non-zero outputs
-                result *= zero_inputs.view(1, -1, 1, 1)
+            result *= zero_inputs.view(1, -1, 1, 1)
 
         # collect upstream data
         batch_size = result.size(0)
         out_channels = result.size(1)
-        upstream = result.data.view(batch_size, out_channels, -1)[0,:,0]
+        upstream = result.data.view(batch_size, out_channels, -1)[0, :, 0]
         layer._meta['bias_backup'] += upstream
         _data = upstream.abs().sum().item()
         if _data > 0:
@@ -155,7 +156,7 @@ def melt(model:nn.Module, verbose=True):
         result *= 0
 
         # add additional bias to next layer input
-        if zero_filters is not None:  
+        if zero_filters is not None:
             additional_stream = (layer._meta['bias_backup'] * zero_filters).view(1, -1)
             while len(additional_stream.size()) < len(result.size()):
                 additional_stream = additional_stream.unsqueeze(-1)
@@ -181,7 +182,7 @@ def melt(model:nn.Module, verbose=True):
     y = model(x)
     if isinstance(y, list):
         for _y in y:
-            assert _y.abs().sum() == 0  
+            assert _y.abs().sum() == 0
     else:
         assert y.abs().sum() == 0, print(y)
 
@@ -257,7 +258,7 @@ def melt(model:nn.Module, verbose=True):
                 new_linear = nn.Linear(
                     weight.size(1),
                     weight.size(0),
-                    bias= layer.bias is not None,
+                    bias=layer.bias is not None,
                     device=weight.device,
                 )
                 new_linear.weight.data = weight
@@ -265,13 +266,13 @@ def melt(model:nn.Module, verbose=True):
                     bias = layer._meta['bias_backup']
                     bias = bias[non_zero_filters]
                     new_linear.bias.data = bias
-                replace_layer(module_name, layer_name, new_linear)    
+                replace_layer(module_name, layer_name, new_linear)
 
         if hasattr(layer, '_meta'):
             del layer._meta
     del modules, target_layers
-    
-    return model 
+
+    return model
 
 
 if __name__ == "__main__":
@@ -290,7 +291,7 @@ if __name__ == "__main__":
     print('=============================')
     print('test sample 1')
     model = nn.Sequential(nn.Conv2d(3, 12, 1, bias=False),)
-    model[0].weight.data[[0,2,4],...] *= 0
+    model[0].weight.data[[0, 2, 4], ...] *= 0
     model.eval()
     x = torch.rand(2, 3, 4, 4)
     y = model(x).abs().sum().item()
@@ -308,7 +309,7 @@ if __name__ == "__main__":
         nn.Linear(12, 5, bias=True),
     )
     model.eval()
-    model[0].weight.data[[0,2,4],...] *= 0
+    model[0].weight.data[[0, 2, 4], ...] *= 0
     x = torch.rand(2, 3, 4, 4)
     # y = model(x).abs().sum().item()
     y = nn.Sequential(*[m for m in model])(x).abs().sum().item()
@@ -330,7 +331,7 @@ if __name__ == "__main__":
         nn.Linear(12, 5, bias=True),
     )
     model.eval()
-    model[0].weight.data[[0,2,4],...] *= 0
+    model[0].weight.data[[0, 2, 4], ...] *= 0
     x = torch.rand(2, 3, 4, 4)
     y = model(x).abs().sum().item()
     model = melt(model)
@@ -358,13 +359,13 @@ if __name__ == "__main__":
         nn.Flatten(1),
         nn.Linear(120, 5),
     )
-    model[0].weight.data[[0,2,4],...] *= 0
-    model[2].weight.data[[1,3,5],...] *= 0
-    model[5].weight.data[[0,2,4],...] *= 0
-    model[8].weight.data[[0,3,5],...] *= 0
-    model[11].weight.data[[0,2,4],...] *= 0
+    model[0].weight.data[[0, 2, 4], ...] *= 0
+    model[2].weight.data[[1, 3, 5], ...] *= 0
+    model[5].weight.data[[0, 2, 4], ...] *= 0
+    model[8].weight.data[[0, 3, 5], ...] *= 0
+    model[11].weight.data[[0, 2, 4], ...] *= 0
     model.eval()
-    x = torch.rand(2, 3, 4, 4)
+    x = torch.rand(64, 3, 4, 4)
     y = model(x).abs().sum().item()
     model = melt(model)
     _y = model(x).abs().sum().item()

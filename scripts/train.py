@@ -89,7 +89,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         weights, epochs, hyp, data_dict = opt.weights, opt.epochs, opt.hyp, loggers.wandb.data_dict
 
     # Model
-    model = Xyolov5s().to(device)  # create
+    model = Xyolov5s(nc=nc).to(device)  # create
     if weights.endswith('.pt'):
         ckpt = torch.load(weights, map_location=device)  # load checkpoint
         if 'model' in ckpt:
@@ -98,6 +98,13 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         else:
             exclude = []
             csd = ckpt
+        if nc != 80:
+            new_csd = model.state_dict()
+            for k in csd.keys():
+                if 'detect.m' not in k:
+                    new_csd[k] = csd[k]
+            csd = new_csd
+            print('skip loading detect.m for new nc=', nc)
         csd = intersect_dicts(csd, model.state_dict(), exclude=exclude)  # intersect
         model.load_state_dict(csd, strict=False)  # load
         LOGGER.info(f'Transferred {len(csd)}/{len(model.state_dict())} items from {weights}')  # report
@@ -223,7 +230,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
     # FPGM initialization
     if opt.fpgm:
         mask = None
-        fpgm_counter = Counter()
+        fpgm_counter = Counter(patience=3)
 
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
         model.train()
@@ -321,6 +328,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                                        plots=plots and final_epoch,
                                        loggers=loggers,
                                        compute_loss=compute_loss,
+                                       nc=nc,
                                        test_mode=opt.test)
 
         # Update best mAP
@@ -330,7 +338,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         loggers.on_train_val_end(mloss, results, lr, epoch, best_fitness, fi)
 
         # Save model
-        last, best = w / f'{epoch}.pt', w / 'best.pt'
+        last, best = w / 'last.pt', w / 'best.pt'
         if (not nosave) or (final_epoch and not evolve):  # if save
             ckpt = {'epoch': epoch,
                     'best_fitness': best_fitness,
@@ -351,7 +359,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
             do_prune = fpgm_counter.step(fi)
             if do_prune:
                 print('fitness not increasing any more, trigger FPGM pruning..')
-                mask = prune(model, device=device)
+                mask = prune(model, compress_rate=0.2, device=device)
                 fpgm_counter.max = 0
 
         # Test mode
@@ -411,18 +419,21 @@ def main(opt):
     print(colorstr('train: ') + ', '.join(f'{k}={v}' for k, v in vars(opt).items()))
 
     # Resume
+    _epochs = opt.epochs  # keep new target epochs
     if opt.resume and not check_wandb_resume(opt):  # resume an interrupted run
         ckpt = opt.resume if isinstance(opt.resume, str) else get_latest_run()  # specified or most recent path
         assert os.path.isfile(ckpt), 'ERROR: --resume checkpoint does not exist'
         with open(Path(ckpt).parent.parent / 'opt.yaml') as f:
             opt = argparse.Namespace(**yaml.safe_load(f))  # replace
         opt.cfg, opt.weights, opt.resume = '', ckpt, True  # reinstate
+
         LOGGER.info(f'Resuming training from {ckpt}')
     else:
         opt.data, opt.cfg, opt.hyp = check_file(opt.data), check_file(opt.cfg), check_file(opt.hyp)  # check files
         assert len(opt.cfg) or len(opt.weights), 'either --cfg or --weights must be specified'
         opt.name = 'evolve' if opt.evolve else opt.name
         opt.save_dir = str(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok or opt.evolve))
+    opt.epochs = _epochs
 
     # Train
     device = select_device(opt.device, batch_size=opt.batch_size)
