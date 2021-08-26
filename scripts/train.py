@@ -228,9 +228,10 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                 f'Starting training for {epochs} epochs...')
 
     # FPGM initialization
+    compress_rate = 1
     if opt.fpgm:
         mask = None
-        fpgm_counter = Counter(patience=3)
+        fpgm_counter = Counter(patience=8)
 
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
         model.train()
@@ -238,8 +239,6 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         # Apply FPGM mask
         if opt.fpgm and mask is not None:
             cut_model(model, mask)
-            if_zero(model, mask)
-            mask = None
 
         # Update mosaic border
         # b = int(random.uniform(0.25 * imgsz, 0.75 * imgsz + gs) // gs * gs)
@@ -335,7 +334,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         fi = fitness(np.array(results).reshape(1, -1))  # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
         if fi > best_fitness:
             best_fitness = fi
-        loggers.on_train_val_end(mloss, results, lr, epoch, best_fitness, fi)
+        loggers.on_train_val_end(mloss, results, lr, epoch, best_fitness, fi, compress_rate)
 
         # Save model
         last, best = w / 'last.pt', w / 'best.pt'
@@ -358,9 +357,22 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         if opt.fpgm:
             do_prune = fpgm_counter.step(fi)
             if do_prune:
+                # Save model
+                fpgm_pt_path = w / f'before-fpgm_ep{epoch}.pt'
+                ckpt = {'epoch': epoch,
+                        'best_fitness': best_fitness,
+                        'model': deepcopy(de_parallel(model)).half(),
+                        'optimizer': optimizer.state_dict(),
+                        'fpgm_mask': None if not opt.fpgm else mask,
+                        'wandb_id': loggers.wandb.wandb_run.id if loggers.wandb else None}
+                torch.save(ckpt, fpgm_pt_path)
+                del ckpt
                 print('fitness not increasing any more, trigger FPGM pruning..')
                 mask = prune(model, compress_rate=0.2, device=device)
                 fpgm_counter.max = 0
+                # check compress_rate
+                if opt.fpgm and mask is not None:
+                    compress_rate = if_zero(model, mask)
 
         # Test mode
         if opt.test:

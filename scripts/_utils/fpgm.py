@@ -80,6 +80,7 @@ def if_zero(model, mask):
             # print("layer: %d, number of nonzero weight is %d, zero is %d" % (
             #     index, np.count_nonzero(b), len(b) - np.count_nonzero(b)))
     print(f'{nz/total:.2%}')
+    return nz/total
 
 
 class Counter():

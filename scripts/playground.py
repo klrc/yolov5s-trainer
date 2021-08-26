@@ -29,6 +29,7 @@ if __name__ == '__main__':
     model.eval()
     model.detect.train()
     y = model(x)
+    print(model.detect.anchors)
 
     model = melt(model)
     _y = model(x)

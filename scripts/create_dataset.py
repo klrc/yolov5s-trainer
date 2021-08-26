@@ -153,13 +153,13 @@ def prune_func(cocox, __dist, dataset='train2017'):
 
         if len(anno_ark) == 0:
             bg_ark.append(m)
-        elif num_human/len(anno_ark) > 0.7:
+        elif num_human/len(anno_ark) > 0.8:
             continue
         else:
             ark.append(m)
 
     print(f'{len(ark)} target images, {len(bg_ark)} background images..')
-    bg_rate = 0.5
+    bg_rate = 0.8
     bg_size = len(ark)/(1-bg_rate)*bg_rate
     bg_ark = random.choices(bg_ark, k=int(bg_size))
     ark.extend(bg_ark)
@@ -179,4 +179,4 @@ if __name__ == "__main__":
     __newsize = sum([len(x) for x in dataset.data.values()])
     print(f"{__newsize/__rawsize:.2%}({__newsize}/{__rawsize}) data preserved")
 
-    export(dataset, '../datasets/coco-p3')
+    export(dataset, '../datasets/coco-p4')

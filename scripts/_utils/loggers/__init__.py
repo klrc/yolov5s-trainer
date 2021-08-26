@@ -58,7 +58,7 @@ class Loggers():
             run_id = torch.load(self.weights).get('wandb_id') if self.opt.resume else None
             self.opt.hyp = self.hyp  # add hyperparameters
             self.wandb = WandbLogger(self.opt, run_id, self.data_dict)
-        except:
+        except Exception:
             self.wandb = None
 
         return self
@@ -93,13 +93,13 @@ class Loggers():
             files = sorted(self.save_dir.glob('val*.jpg'))
             self.wandb.log({"Validation": [wandb.Image(str(f), caption=f.name) for f in files]})
 
-    def on_train_val_end(self, mloss, results, lr, epoch, best_fitness, fi):
+    def on_train_val_end(self, mloss, results, lr, epoch, best_fitness, fi, compress_rate):
         # Callback runs on val end during training
-        vals = list(mloss) + list(results) + lr
+        vals = list(mloss) + list(results) + lr + [compress_rate]
         keys = ['train/box_loss', 'train/obj_loss', 'train/cls_loss',  # train loss
                 'metrics/precision', 'metrics/recall', 'metrics/mAP_0.5', 'metrics/mAP_0.5:0.95',  # metrics
                 'val/box_loss', 'val/obj_loss', 'val/cls_loss',  # val loss
-                'x/lr0', 'x/lr1', 'x/lr2']  # params
+                'x/lr0', 'x/lr1', 'x/lr2', 'metrics/compress_rate']  # params
         x = {k: v for k, v in zip(keys, vals)}  # dict
 
         if self.csv:
