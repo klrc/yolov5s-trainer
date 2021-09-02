@@ -1,11 +1,11 @@
 from _utils.models import Xyolov5s
-from _utils.melt import melt
+from _utils.melt2 import melt
 import torch
 
 if __name__ == '__main__':
 
     device = 'cpu'
-    weights = 'runs/train/exp58/weights/last.pt'
+    weights = 'runs/release/last.pt'
 
     # Model
     nc = 6
@@ -24,15 +24,18 @@ if __name__ == '__main__':
         #     csd = new_csd
         model.load_state_dict(csd, strict=False)  # load
 
-    x = torch.rand(64, 3, 224, 224)
+    x = torch.rand(4, 3, 224, 224)
 
-    model.eval()
-    model.detect.train()
+    model.eval().fuse().dsp()
+    # model.detect.train()
+
     y = model(x)
-    print(model.detect.anchors)
+    _y = melt(model)(x)
+    
+    for y1, y2 in zip(y, _y):
+        print(y1.shape, y2.shape)
+        float_ratio = ((y1 - y2)/y1).abs().max().item()
+        print(f'output error: {float_ratio:.16f}')
+        # assert float_ratio < 1e-4
+        print()
 
-    model = melt(model)
-    _y = model(x)
-
-    for yi, _yi in zip(y, _y):
-        print(yi.abs().sum(), _yi.abs().sum())

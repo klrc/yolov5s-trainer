@@ -377,6 +377,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                 fpgm_counter.max = 0
                 # check compress_rate
                 if opt.fpgm and mask is not None:
+                    cut_model(model, mask)
                     compress_rate = if_zero(model, mask)
 
         # Test mode
