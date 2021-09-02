@@ -84,12 +84,15 @@ def if_zero(model, mask):
 
 
 class Counter():
-    def __init__(self, patience=5):
+    def __init__(self, patience=5, inf=False):
         self.patience = patience
         self.counter = 0
         self.max = 0
+        self.inf = inf
     
     def step(self, x):
+        if self.inf:
+            return False
         if x >= self.max:
             self.max = x
             self.counter = 0

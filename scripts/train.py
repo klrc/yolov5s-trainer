@@ -90,8 +90,12 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
 
     # Model
     model = Xyolov5s(nc=nc).to(device)  # create
+    mask = None  # mask
     if weights.endswith('.pt'):
         ckpt = torch.load(weights, map_location=device)  # load checkpoint
+        if 'fpgm_mask' in ckpt:
+            mask = ckpt['fpgm_mask']
+            print('using exist fpgm mask')
         if 'model' in ckpt:
             exclude = ['anchor'] if (cfg or hyp.get('anchors')) and not resume else []  # exclude keys
             csd = ckpt['model'].float().state_dict()  # checkpoint state_dict as FP32
@@ -230,8 +234,9 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
     # FPGM initialization
     compress_rate = 1
     if opt.fpgm:
-        mask = None
-        fpgm_counter = Counter(patience=8)
+        if mask is not None:
+            compress_rate = if_zero(model, mask)
+        fpgm_counter = Counter(patience=8, inf=True)
 
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
         model.train()
