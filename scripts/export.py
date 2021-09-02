@@ -1,6 +1,6 @@
 import torch
 from _utils.models import Xyolov5s
-from _utils.melt import melt
+from melt3 import melt
 
 
 def export_onnx(model, img, f, opset):
@@ -39,7 +39,7 @@ def run(model, output_path):
 if __name__ == '__main__':
 
     device = 'cpu'
-    weights = 'runs/train/exp58/weights/last.pt'
+    weights = 'runs/release/last.pt'
 
     # Model
     nc = 6
@@ -60,7 +60,8 @@ if __name__ == '__main__':
 
     x = torch.rand(64, 3, 224, 224)
 
-    model.eval().fuse().dsp()
+    model.eval().dsp()
+    # print(model.detect.anchors)
     # model.detect.train()
     y = model(x)
 
@@ -68,6 +69,6 @@ if __name__ == '__main__':
     _y = model(x)
 
     for yi, _yi in zip(y, _y):
-        print(yi.abs().sum(), _yi.abs().sum())
+        print(((yi-_yi)/yi).abs().max())
 
-    run(model, '../yolov5s-builder/build/yolov5s.onnx')
+    run(model.fuse(), 'runs/release/yolov5s.onnx')
