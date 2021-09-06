@@ -39,7 +39,7 @@ def run(model, output_path):
 if __name__ == '__main__':
 
     device = 'cpu'
-    weights = 'runs/release/last.pt'
+    weights = 'runs/train/exp67/weights/last.pt'
 
     # Model
     nc = 6
@@ -58,7 +58,7 @@ if __name__ == '__main__':
         #     csd = new_csd
         model.load_state_dict(csd, strict=False)  # load
 
-    x = torch.rand(64, 3, 224, 224)
+    x = torch.rand(4, 3, 224, 224)
 
     model.eval().dsp()
     # print(model.detect.anchors)

@@ -527,7 +527,7 @@ def melt(model, test_shape=(4,3,224,416)):
         checksum_b = sum([_y.abs().sum() for _y in y])
     print('checksum_loss:', abs((checksum_a - checksum_b) / checksum_a).item())
 
-    render(graph, 100)
+    # render(graph, 100)
     return model
 
 if __name__ == '__main__':
@@ -558,4 +558,4 @@ if __name__ == '__main__':
         checksum_b = sum([_y.abs().sum() for _y in y])
     print('checksum_loss:', abs((checksum_a - checksum_b) / checksum_a).item())
 
-    render(graph, 100)
+    # render(graph, 100)
