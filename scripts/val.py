@@ -11,7 +11,7 @@ from _utils.metrics import ap_per_class, ConfusionMatrix
 from _utils.general import coco80_to_coco91_class, check_dataset, check_file, check_img_size, check_requirements, \
     box_iou, non_max_suppression, scale_coords, xyxy2xywh, xywh2xyxy, set_logging, increment_path, colorstr
 from _utils.datasets import create_dataloader
-from _utils.models import Xyolov5s
+from _utils.models import load_model
 import argparse
 import os
 import sys
@@ -96,7 +96,6 @@ def run(data,
         plots=True,
         loggers=Loggers(),
         compute_loss=None,
-        test_mode=False,
         nc=6,
         ):
     # Initialize/load model and set device
@@ -112,15 +111,7 @@ def run(data,
         (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
 
         # Load model
-        model = Xyolov5s(nc=nc).to(device)  # create
-        weights = weights[0]
-        if weights.endswith('.pt'):
-            ckpt = torch.load(weights, map_location=device)  # load checkpoint
-        if 'model' in ckpt:
-            csd = ckpt['model'].float().state_dict()  # checkpoint state_dict as FP32
-        else:
-            csd = ckpt
-        model.load_state_dict(csd, strict=False)  # load
+        model, _, _ = load_model(weights, device)
         model = model.float().fuse().eval().to(device)
         gs = 32  # grid size (max stride)
         imgsz = check_img_size(imgsz, s=32)  # check image size
@@ -154,8 +145,7 @@ def run(data,
 
     if model.nc == 6:
         names = {0: 'person', 1: 'bicycle', 2: 'car', 3: 'motorcycle', 4: 'bus', 5: 'truck'}
-
-    else:
+    elif model.nc == 80:
         names = {0: 'person', 1: 'bicycle', 2: 'car', 3: 'motorcycle', 4: 'airplane', 5: 'bus', 6: 'train', 7: 'truck', 8: 'boat',
                  9: 'traffic light', 10: 'fire hydrant', 11: 'stop sign', 12: 'parking meter', 13: 'bench', 14: 'bird', 15: 'cat', 16: 'dog',
                  17: 'horse', 18: 'sheep', 19: 'cow', 20: 'elephant', 21: 'bear', 22: 'zebra', 23: 'giraffe', 24: 'backpack', 25: 'umbrella',
@@ -166,6 +156,8 @@ def run(data,
                  58: 'potted plant', 59: 'bed', 60: 'dining table', 61: 'toilet', 62: 'tv', 63: 'laptop', 64: 'mouse', 65: 'remote',
                  66: 'keyboard', 67: 'cell phone', 68: 'microwave', 69: 'oven', 70: 'toaster', 71: 'sink',  72: 'refrigerator', 73: 'book',
                  74: 'clock', 75: 'vase', 76: 'scissors', 77: 'teddy bear', 78: 'hair drier', 79: 'toothbrush'}
+    else:
+        raise NotImplementedError
 
     seen = 0
     confusion_matrix = ConfusionMatrix(nc=nc)
@@ -245,9 +237,6 @@ def run(data,
             f = save_dir / f'val_batch{batch_i}_pred.jpg'  # predictions
             Thread(target=plot_images, args=(img, output_to_target(out), paths, f, names), daemon=True).start()
 
-        # Test mode
-        if test_mode:
-            break
         # end batch -------------------
 
     # Compute statistics

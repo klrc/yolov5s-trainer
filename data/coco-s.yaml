@@ -18,7 +18,6 @@ nc: 6  # number of classes
 names: [ 'person', 'bicycle', 'car', 'motorcycle', 'bus', 'truck' ]  # class names
 
 
-
 # Download script/URL (optional)
 download: |
   from utils.general import download, Path

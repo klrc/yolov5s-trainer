@@ -1,13 +1,13 @@
 """Train a YOLOv5 model on a custom dataset
 
 Usage:
-    $ python scripts/train.py --data coco.yaml --img 416 --weights prototype/ancient.pt --hyp data/hyps/hyp.finetune.yaml --batch-size 32 --fpgm --epochs 100
+    $ python scripts/train.py --data coco.yaml --img 416 --weights prototype/ancient.pt --hyp data/hyps/hyp.finetune.yaml --batch-size 32 --epochs 100
 """
 
 from _utils.loggers import Loggers
 from _utils.metrics import fitness
 from _utils.loggers.wandb.wandb_utils import check_wandb_resume
-from _utils.torch_utils import select_device, intersect_dicts, de_parallel
+from _utils.torch_utils import select_device, de_parallel
 from _utils.plots import plot_labels
 from _utils.loss import ComputeLoss
 from _utils.general import labels_to_class_weights, increment_path, init_seeds, \
@@ -16,8 +16,7 @@ from _utils.datasets import create_dataloader
 from _utils.autoanchor import check_anchors
 from _utils.melt4 import shrink
 from _utils.counter import Counter
-# from _utils.fpgm import prune, cut_model, cut_grad, if_zero, Counter
-from _utils.models import Xyolov5s
+from _utils.models import load_model
 
 import val
 import argparse
@@ -49,8 +48,8 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
           opt,
           device,
           ):
-    save_dir, epochs, batch_size, weights, single_cls, evolve, data, cfg, resume, noval, nosave, workers, = \
-        Path(opt.save_dir), opt.epochs, opt.batch_size, opt.weights, opt.single_cls, opt.evolve, opt.data, opt.cfg, \
+    save_dir, epochs, batch_size, weights, single_cls, evolve, data, resume, noval, nosave, workers, = \
+        Path(opt.save_dir), opt.epochs, opt.batch_size, opt.weights, opt.single_cls, opt.evolve, opt.data, \
         opt.resume, opt.noval, opt.nosave, opt.workers
 
     # Detect anomaly
@@ -91,29 +90,8 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         weights, epochs, hyp, data_dict = opt.weights, opt.epochs, opt.hyp, loggers.wandb.data_dict
 
     # Model
-    model = Xyolov5s().to(device)  # create
-    if weights.endswith('.pt'):
-        ckpt = torch.load(weights, map_location=device)  # load checkpoint
-        # for different version of checkpoint files
-        if 'model' in ckpt:
-            # exclude = ['anchor'] if (cfg or hyp.get('anchors')) and not resume else []  # exclude keys
-            csd = ckpt['model'].float().state_dict()  # checkpoint state_dict as FP32
-        elif 'state_dict' in ckpt:
-            csd = ckpt['state_dict']
-        else:
-            csd = ckpt
-        model.squeeze_loader(csd)
-        LOGGER.info(f'Transferred {len(csd)}/{len(model.state_dict())} items from {weights}')  # report
-
-    # Freeze
-    freeze = []  # parameter names to freeze (full or partial)
-    for k, v in model.named_parameters():
-        print(k)
-        v.requires_grad = True  # train all layers
-        if any(x in k for x in freeze):
-            print(f'freezing {k}')
-            v.requires_grad = False
-    raise ValueError
+    model, ckpt, csd = load_model(weights, device, nc)
+    LOGGER.info(f'Transferred {len(csd)}/{len(model.state_dict())} items from {weights}')  # report
 
     # Optimizer
     nbs = 64  # nominal batch size
@@ -222,21 +200,11 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                 f'Logging results to {save_dir}\n'
                 f'Starting training for {epochs} epochs...')
 
-    # FPGM initialization
+    # early-stop counter initialization
     fitness_counter = Counter(patience=10)
     is_training_stuck = False
 
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
-        # check if need fpgm
-        # FPGM for Xyolov5s only ------------------------
-        if is_training_stuck and opt.fpgm:
-            model = shrink(
-                model, 
-                mode='fpgm', 
-                blacklist=['backbone_stage_1.0.focus', 'detect.m.0', 'detect.m.1', 'detect.m.2'],
-            )
-        # -----------------------------------------------
-
         model.train()
         # Update mosaic border
         # b = int(random.uniform(0.25 * imgsz, 0.75 * imgsz + gs) // gs * gs)
@@ -295,10 +263,6 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                 f'{epoch}/{epochs - 1}', mem, *mloss, targets.shape[0], imgs.shape[-1]))
             loggers.on_train_batch_end(ni, model, imgs, targets, paths, plots)
 
-            # Test mode
-            if opt.test:
-                break
-
             # end batch ------------------------------------------------------------------------------------------------
 
         # Scheduler
@@ -321,8 +285,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                                        plots=plots and final_epoch,
                                        loggers=loggers,
                                        compute_loss=compute_loss,
-                                       nc=nc,
-                                       test_mode=opt.test)
+                                       nc=nc)
 
         # Update best mAP
         fi = fitness(np.array(results).reshape(1, -1))  # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
@@ -338,7 +301,6 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                     'best_fitness': best_fitness,
                     'state_dict': deepcopy(de_parallel(model)).half().state_dict(),
                     'optimizer': optimizer.state_dict(),
-                    'fpgm_mask': None if not opt.fpgm else mask,
                     'wandb_id': loggers.wandb.wandb_run.id if loggers.wandb else None}
 
             # Save last, best and delete
@@ -348,9 +310,23 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
             del ckpt
             loggers.on_model_save(last, epoch, final_epoch, best_fitness, fi)
 
-        # Test mode
-        if opt.test:
-            break
+        # check if need fpgm
+        # FPGM for Xyolov5s only ------------------------
+        if is_training_stuck:
+            model.cpu().dsp()
+            model = shrink(
+                model,
+                mode='fpgm',
+                blacklist=['backbone_stage_1.0.focus', 'detect.m.0', 'detect.m.1', 'detect.m.2'],
+            )
+            model.to(device).torch()
+            born = w / 'born.pt'
+            ckpt = {'epoch': epoch,
+                    'state_dict': deepcopy(de_parallel(model)).half().state_dict(),
+                    'wandb_id': loggers.wandb.wandb_run.id if loggers.wandb else None}
+            torch.save(ckpt, born)
+            return born
+        # ----------------------------------------------
 
         # end epoch ----------------------------------------------------------------------------------------------------
     # end training -----------------------------------------------------------------------------------------------------
@@ -392,11 +368,8 @@ def parse_opt(known=False):
     parser.add_argument('--bbox_interval', type=int, default=-1, help='Set bounding-box image logging interval for W&B')
     parser.add_argument('--save_period', type=int, default=-1, help='Log model after every "save_period" epoch')
     parser.add_argument('--artifact_alias', type=str, default="latest", help='version of dataset artifact to be used')
-    parser.add_argument('--fpgm', action='store_true', help='use FPGM pruning')
-    parser.add_argument('--test', action='store_true', help='testing mode')
     parser.add_argument('--detect_anomaly', action='store_true', help='enable detect anomaly for debugging')
     opt = parser.parse_known_args()[0] if known else parser.parse_args()
-    print('set using fpgm =', opt.fpgm)
     return opt
 
 
@@ -423,7 +396,7 @@ def main(opt):
 
     # Train
     device = select_device(opt.device, batch_size=opt.batch_size)
-    train(opt.hyp, opt, device)
+    return train(opt.hyp, opt, device)
 
 
 def run(**kwargs):
@@ -431,9 +404,23 @@ def run(**kwargs):
     opt = parse_opt(True)
     for k, v in kwargs.items():
         setattr(opt, k, v)
-    main(opt)
+    return main(opt)
+
+
+def fpgm_run():
+    options = {
+        'data': 'coco-s.yaml',
+        'weights': 'prototype/ancient.pt',
+        'imgsz': 416,
+        'batch-size': 32,
+    }
+    next_gen_seed = run(**options)
+    while next_gen_seed is not None:
+        options['weights'] = str(next_gen_seed)
+        next_gen_seed = run(**options)
 
 
 if __name__ == "__main__":
-    opt = parse_opt()
-    main(opt)
+    # opt = parse_opt()
+    # main(opt)
+    fpgm_run()

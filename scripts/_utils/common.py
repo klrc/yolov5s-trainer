@@ -119,13 +119,14 @@ class Detect(nn.Module):
         self.register_buffer('anchors', a)  # shape(nl,na,2)
         self.register_buffer('anchor_grid', a.clone().view(self.nl, 1, -1, 1, 1, 2))  # shape(nl,1,na,1,1,2)
         self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch)  # output conv
+        self.forward = self._torch_forward
 
     @staticmethod
     def _make_grid(nx=20, ny=20):
         yv, xv = torch.meshgrid([torch.arange(ny), torch.arange(nx)])
         return torch.stack((xv, yv), 2).view((1, 1, ny, nx, 2)).float()
 
-    def forward(self, x):
+    def _torch_forward(self, x):
         # x = x.copy()  # for profiling
         z = []  # inference output
         for i in range(self.nl):
@@ -144,7 +145,7 @@ class Detect(nn.Module):
 
         return x if self.training else (torch.cat(z, 1), x)
 
-    def dspforward(self, x):
+    def _dsp_forward(self, x):
         for i in range(self.nl):
             x[i] = self.m[i](x[i])  # conv
         return x

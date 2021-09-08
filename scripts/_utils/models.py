@@ -84,10 +84,111 @@ class Xyolov5s(nn.Module):
         return self
 
     def dsp(self):
-        for m in self.modules():
-            if type(m) is Detect:
-                m.forward = m.dspforward  # update forward
+        self.detect.forward = self.detect._dsp_forward
+        return self
+
+    def torch(self):
+        self.detect.forward = self.detect._torch_forward
         return self
 
     def squeeze_loader(self, state_dict):
-        pass
+        # register layer info
+        ll = {}
+        for lid, layer in self.named_modules():
+            if any(layer.children()):
+                continue
+            ll[lid] = layer
+            layer.lid = lid
+        # register father module
+        fm = {}
+        for m in self.modules():
+            for cid, layer in m.named_children():
+                if hasattr(layer, 'lid'):
+                    fm[layer.lid] = (cid, m)
+                    del layer.lid
+        # squeeze model layers
+        _squeeze_layers(ll, fm, state_dict)
+        self.load_state_dict(state_dict)
+        # check nc
+        loaded_no = self.detect.m[0].weight.size(0)//3
+        loaded_nc = loaded_no - 5
+        # if loaded model does not satisfy dataset
+        if self.nc != loaded_nc:
+            # reload detect
+            self.detect = Detect(self.nc)
+        return self
+
+
+def _squeeze_layers(ll, fm, state_dict):
+    for lid, layer in ll.items():
+        if type(layer) in (nn.Conv2d, nn.Linear):
+            w = state_dict[lid + '.weight']
+            ic, oc = w.size(1), w.size(0)
+            if type(layer) == nn.Conv2d:
+                new_layer = nn.Conv2d(
+                    in_channels=ic,
+                    out_channels=oc,
+                    kernel_size=layer.kernel_size,
+                    stride=layer.stride,
+                    padding=layer.padding,
+                    dilation=layer.dilation,
+                    groups=layer.groups,
+                    bias=layer.bias is not None,
+                    padding_mode=layer.padding_mode,
+                    device=layer.weight.device,
+                    dtype=layer.weight.dtype,
+                )
+            elif type(layer) == nn.Linear:
+                new_layer = nn.Linear(
+                    in_features=torch.count_nonzero(ic),
+                    out_features=torch.count_nonzero(oc),
+                    bias=layer.bias is not None,
+                    device=layer.weight.device,
+                    dtype=layer.weight.dtype,
+                )
+            cid, m = fm[lid]
+            setattr(m, cid, new_layer)
+        elif type(layer) == nn.BatchNorm2d:
+            w = state_dict[lid + '.weight']
+            n = w.size(0)
+            new_layer = nn.BatchNorm2d(
+                num_features=n,
+                eps=layer.eps,
+                momentum=layer.momentum,
+                affine=layer.affine,
+                track_running_stats=layer.track_running_stats,
+                device=layer.weight.device,
+                dtype=layer.weight.dtype,
+            )
+            cid, m = fm[lid]
+            setattr(m, cid, new_layer)
+    return
+
+
+def load_model(weights, device, nc):
+    # Model
+    model = Xyolov5s(nc=nc).to(device)  # create
+    if weights.endswith('.pt'):
+        ckpt = torch.load(weights, map_location=device)  # load checkpoint
+        # for different version of checkpoint files
+        if 'model' in ckpt:
+            # exclude = ['anchor'] if (cfg or hyp.get('anchors')) and not resume else []  # exclude keys
+            csd = ckpt['model'].float().state_dict()  # checkpoint state_dict as FP32
+        elif 'state_dict' in ckpt:
+            csd = ckpt['state_dict']
+        else:
+            csd = ckpt
+        model.squeeze_loader(csd)
+        model.to(device)
+    # Freeze
+    freeze = [
+        'backbone_stage_1.0.focus.weight',
+        'detect.anchors',
+        'detect.anchor_grids',
+    ]
+    for k, v in model.named_parameters():
+        v.requires_grad = True  # train all layers
+        if any(x in k for x in freeze):
+            print(f'freezing {k}')
+            v.requires_grad = False
+    return model, ckpt, csd

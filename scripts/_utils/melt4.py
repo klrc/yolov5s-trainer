@@ -12,6 +12,8 @@ from functools import reduce
 # for plt visualization issue
 pylab.ion()
 # visualizations
+
+
 def render(G: nx.Graph, pause=5, pos=None):
     # render function using networkx
     if pos is None:
@@ -22,7 +24,7 @@ def render(G: nx.Graph, pause=5, pos=None):
         G, pos,
         node_color=range(G.number_of_nodes()),
         cmap=cmap,
-        node_size=8,    
+        node_size=8,
     )
     nx.draw_networkx_edges(
         G, pos,
@@ -45,14 +47,16 @@ def render(G: nx.Graph, pause=5, pos=None):
     plt.close()
     return pos
 
+
 class Handle():
     def __init__(self, cls, name, raw_func):
         self.cls = cls
         self.name = name
         self.raw_func = raw_func
-    
+
     def remove(self):
         setattr(self.cls, self.name, self.raw_func)
+
 
 class Hooks():
     def __init__(self) -> None:
@@ -69,16 +73,18 @@ class Hooks():
             handle.remove()
         del self
 
+
 def removable_hooks():
     return Hooks()
 
+
 class TracerUtils():
     supported_ops = dict(
-        cat_ops = ['cat'],
-        pass_ops = ['flatten'],
-        join_ops = ['add', 'sub', 'mul', 'div'],
-        join_ops_tensor = [
-            '__add__', '__iadd__', '__radd__', 
+        cat_ops=['cat'],
+        pass_ops=['flatten'],
+        join_ops=['add', 'sub', 'mul', 'div'],
+        join_ops_tensor=[
+            '__add__', '__iadd__', '__radd__',
             '__sub__', '__isub__', '__rsub__',
             '__mul__', '__imul__', '__rmul__',
             '__div__', '__idiv__', '__rdiv__',
@@ -87,14 +93,14 @@ class TracerUtils():
 
     def __init__(self) -> None:
         pass
-    
+
     @staticmethod
     def self_increase_id(id, graph):
         i = 0
         while f'{id}#{i}' in graph:
             i += 1
         return f'{id}#{i}'
-        
+
     @staticmethod
     def get_layer_op_id(layer):
         op_order = len(layer.trace_stack)
@@ -102,6 +108,7 @@ class TracerUtils():
 
     def register_op_hook(self, cls, name, hook):
         raw_func = getattr(cls, name)
+
         def hooked_func(*args, **kwargs):
             result = raw_func(*args, **kwargs)
             result = hook(name, result, *args, **kwargs)
@@ -110,7 +117,7 @@ class TracerUtils():
         self.hooks.append(Handle(cls, name, raw_func))
 
     def bind_hooks(self, hooks, graph: nx.DiGraph):
-        
+
         def single_source_op_hook(layer, result, input, *args, **kwargs):
             op = self.self_increase_id(layer, graph)
             graph.add_edge(input.trace_op, op, args=args, **kwargs)
@@ -154,6 +161,7 @@ class TracerUtils():
 
         return graph
 
+
 def isolate(graph: nx.DiGraph):
     clusters = []
     for nodes in graph.edges():
@@ -169,10 +177,11 @@ def isolate(graph: nx.DiGraph):
         clusters = next_gen
     return clusters
 
+
 class ClusterUtils():
     def __init__(self) -> None:
         pass
-    
+
     @staticmethod
     def leaf_layers(model, graph):
         # create {lid: layer} dict
@@ -187,7 +196,7 @@ class ClusterUtils():
         # register layer type
         lt = {}
         T = TracerUtils.supported_ops
-        ops = reduce(lambda x,y:x+y, T.values())
+        ops = reduce(lambda x, y: x+y, T.values())
         for lid in graph.nodes():
             true_lid = lid.split('#')[0]
             if true_lid in ll:
@@ -206,7 +215,7 @@ class ClusterUtils():
         dep_graph = nx.DiGraph()
         cat_graph = nx.DiGraph()
         T = TracerUtils.supported_ops
-        ops = reduce(lambda x,y:x+y, T.values())
+        ops = reduce(lambda x, y: x+y, T.values())
         cat_ops = ['cat']
         split_ops = ['Conv2d', 'Linear', 'input.']
         fuse_ops = [x for x in ops if x not in split_ops]
@@ -234,6 +243,7 @@ class ClusterUtils():
                 dep_graph.add_edge(*ns, **data)
         return dep_graph, cat_graph
 
+
 def broadcast_infection(clusters, infected):
     unresolved = [True for _ in clusters]
     while any(unresolved):
@@ -245,7 +255,7 @@ def broadcast_infection(clusters, infected):
                 # start infection
                 deads = [infected[x] for x in source]
                 if cluster_type == 'join':
-                    dead_channels = reduce(lambda x,y:x*y, deads)
+                    dead_channels = reduce(lambda x, y: x*y, deads)
                     for x in infection + source:  # infect both source and target
                         infected[x] = dead_channels
                 elif cluster_type == 'cat':   # infect(cat) target only
@@ -257,6 +267,7 @@ def broadcast_infection(clusters, infected):
             unresolved[i] = False
         print('unresolved:', unresolved.count(True))
     return infected
+
 
 def replace_infected_layers(infected, ll, fm):
     for lid, layer in ll.items():
@@ -293,7 +304,7 @@ def replace_infected_layers(infected, ll, fm):
             cid, m = fm[lid]
             setattr(m, cid, new_layer)
         elif type(layer) == nn.BatchNorm2d:
-            mask = ~infected[(lid, 'pass')].bool()  
+            mask = ~infected[(lid, 'pass')].bool()
             new_layer = nn.BatchNorm2d(
                 num_features=torch.count_nonzero(mask),
                 eps=layer.eps,
@@ -305,7 +316,7 @@ def replace_infected_layers(infected, ll, fm):
             )
             new_layer.weight.data.copy_(layer.weight.data[mask])
             new_layer.bias.data.copy_(layer.bias.data[mask])
-            new_layer.running_mean.data.copy_(layer.running_mean.data[mask])      
+            new_layer.running_mean.data.copy_(layer.running_mean.data[mask])
             new_layer.running_var.data.copy_(layer.running_var.data[mask])
             cid, m = fm[lid]
             setattr(m, cid, new_layer)
@@ -316,7 +327,8 @@ def replace_infected_layers(infected, ll, fm):
     #   torch, torch.tensor, torch.nn.functional
     # in order to trace forward compute graph
 
-def trace_compute_graph(model: nn.Module, tracer_shape=(4,3,224,224)):
+
+def trace_compute_graph(model: nn.Module, tracer_shape=(4, 3, 224, 224)):
     with removable_hooks() as hooks:
         tracer = TracerUtils()
         graph = tracer.bind_hooks(hooks, nx.DiGraph())
@@ -337,13 +349,14 @@ def trace_compute_graph(model: nn.Module, tracer_shape=(4,3,224,224)):
                 layer.lid = lid
                 # register tracer hook for layer ops
                 hooks.append(layer.register_forward_hook(tracer.forward_hook))
-                hooks.append(layer.register_forward_pre_hook(tracer.forward_pre_hook))    
+                hooks.append(layer.register_forward_pre_hook(tracer.forward_pre_hook))
         # trace
         x = torch.rand(*tracer_shape)
         x.trace_op = 'input.'
         model.eval().forward(x)
     # render(graph, 100)
     return graph
+
 
 def find_clusters(model, graph: nx.DiGraph):
     T = ClusterUtils
@@ -362,7 +375,7 @@ def find_clusters(model, graph: nx.DiGraph):
                 infection.append(node)
         clusters.append([source, infection, 'join'])
     for _, v, data in cat_graph.edges(data=True):
-        source, infection = sorted(data['meta'], key=lambda x:x[1]), [v]
+        source, infection = sorted(data['meta'], key=lambda x: x[1]), [v]
         source = [x[0] for x in source]
         clusters.append([source, infection, 'cat'])
     # display --------------------------------------------
@@ -377,6 +390,7 @@ def find_clusters(model, graph: nx.DiGraph):
     #         print(line)
     #     print()
     return clusters
+
 
 def find_dead_channels(model, clusters, mode, compress_rate=0.1, blacklist=[]):
     ll = {}
@@ -427,6 +441,7 @@ def find_dead_channels(model, clusters, mode, compress_rate=0.1, blacklist=[]):
     #     print(x, torch.count_nonzero(d))
     return infected
 
+
 def prune_dead_channels(model, infected: dict):
     # register layer info
     ll = {}
@@ -438,7 +453,7 @@ def prune_dead_channels(model, infected: dict):
     # register father module
     fm = {}
     for m in model.modules():
-        for cid, layer in m.named_children():       
+        for cid, layer in m.named_children():
             if hasattr(layer, 'lid'):
                 fm[layer.lid] = (cid, m)
                 del layer.lid
@@ -450,21 +465,23 @@ def prune_dead_channels(model, infected: dict):
     # we just prune here and leave it to fine-tune.
     replace_infected_layers(infected, ll, fm)
 
+
 def shrink(model, mode, blacklist=[]):
     # -----------------------------------------------------
-    # Transform a sparse model into a compact model 
+    # Transform a sparse model into a compact model
     # to reduce size and computational cost.
     # it works in following steps:
     #   1. trace compute graph for leaf layers (e.g. nn.Conv2d, nn.Maxpool2d, nn.Linear...)
     #   2. find clusters with same dependency
     #   2. find dead channels (or target channels for FPGM)
     #   3. prune dead channels
-    # 
+    #
     graph = trace_compute_graph(model)
     clusters = find_clusters(model, graph)
     infected = find_dead_channels(model, clusters, mode=mode, blacklist=blacklist)
     prune_dead_channels(model, infected)
     return model
+
 
 if __name__ == '__main__':
     # from torchvision.models import resnet18
@@ -477,8 +494,8 @@ if __name__ == '__main__':
     #         layer.weight.data[rand_p_index,...] *= 0
     model.eval()
     model = shrink(
-        model, 
-        mode='fpgm', 
+        model,
+        mode='fpgm',
         blacklist=['backbone_stage_1.0.focus', 'detect.m.0', 'detect.m.1', 'detect.m.2'],
     )
-    model.forward(torch.rand(4,3,224,224))
+    model.forward(torch.rand(4, 3, 224, 224))

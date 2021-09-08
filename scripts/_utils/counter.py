@@ -3,7 +3,7 @@ class Counter():
         self.patience = patience
         self.descending = descending
         self.reset()
-    
+
     def step(self, x):
         if (self.descending and x <= self._best) or (not self.descending and x >= self._best):
             self._best = x
