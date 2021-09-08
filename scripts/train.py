@@ -14,7 +14,9 @@ from _utils.general import labels_to_class_weights, increment_path, init_seeds, 
     get_latest_run, check_dataset, check_file, check_img_size, set_logging, one_cycle, colorstr
 from _utils.datasets import create_dataloader
 from _utils.autoanchor import check_anchors
-from _utils.fpgm import prune, cut_model, cut_grad, if_zero, Counter
+from _utils.melt4 import shrink
+from _utils.counter import Counter
+# from _utils.fpgm import prune, cut_model, cut_grad, if_zero, Counter
 from _utils.models import Xyolov5s
 
 import val
@@ -89,40 +91,29 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         weights, epochs, hyp, data_dict = opt.weights, opt.epochs, opt.hyp, loggers.wandb.data_dict
 
     # Model
-    model = Xyolov5s(nc=nc).to(device)  # create
-    mask = None  # mask
+    model = Xyolov5s().to(device)  # create
     if weights.endswith('.pt'):
         ckpt = torch.load(weights, map_location=device)  # load checkpoint
-        if 'fpgm_mask' in ckpt:
-            mask = ckpt['fpgm_mask']
-            print('using exist fpgm mask')
+        # for different version of checkpoint files
         if 'model' in ckpt:
-            exclude = ['anchor'] if (cfg or hyp.get('anchors')) and not resume else []  # exclude keys
+            # exclude = ['anchor'] if (cfg or hyp.get('anchors')) and not resume else []  # exclude keys
             csd = ckpt['model'].float().state_dict()  # checkpoint state_dict as FP32
+        elif 'state_dict' in ckpt:
+            csd = ckpt['state_dict']
         else:
-            exclude = []
             csd = ckpt
-        if nc != 80:
-            new_csd = model.state_dict()
-            for k in csd.keys():
-                if 'detect.m' not in k:
-                    new_csd[k] = csd[k]
-            csd = new_csd
-            print('skip loading detect.m for new nc=', nc)
-        csd = intersect_dicts(csd, model.state_dict(), exclude=exclude)  # intersect
-        model.load_state_dict(csd, strict=False)  # load
+        model.squeeze_loader(csd)
         LOGGER.info(f'Transferred {len(csd)}/{len(model.state_dict())} items from {weights}')  # report
 
     # Freeze
     freeze = []  # parameter names to freeze (full or partial)
     for k, v in model.named_parameters():
-        if '.anchor' in k or '.focus' in k:  # skip detection anchor
-            print(f'skipping layer {k}')
-            continue
+        print(k)
         v.requires_grad = True  # train all layers
         if any(x in k for x in freeze):
             print(f'freezing {k}')
             v.requires_grad = False
+    raise ValueError
 
     # Optimizer
     nbs = 64  # nominal batch size
@@ -232,19 +223,21 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                 f'Starting training for {epochs} epochs...')
 
     # FPGM initialization
-    compress_rate = 1
-    if opt.fpgm:
-        if mask is not None:
-            compress_rate = if_zero(model, mask)
-        fpgm_counter = Counter(patience=8, inf=True)
+    fitness_counter = Counter(patience=10)
+    is_training_stuck = False
 
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
+        # check if need fpgm
+        # FPGM for Xyolov5s only ------------------------
+        if is_training_stuck and opt.fpgm:
+            model = shrink(
+                model, 
+                mode='fpgm', 
+                blacklist=['backbone_stage_1.0.focus', 'detect.m.0', 'detect.m.1', 'detect.m.2'],
+            )
+        # -----------------------------------------------
+
         model.train()
-
-        # Apply FPGM mask
-        if opt.fpgm and mask is not None:
-            cut_model(model, mask)
-
         # Update mosaic border
         # b = int(random.uniform(0.25 * imgsz, 0.75 * imgsz + gs) // gs * gs)
         # dataset.mosaic_border = [b - imgsz, -b]  # height, width borders
@@ -287,10 +280,6 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
             # Backward
             with torch.autograd.set_detect_anomaly(True):
                 scaler.scale(loss).backward()
-
-            # Gradient cutting for FPGM
-            if opt.fpgm and mask is not None:
-                cut_grad(model, mask)
 
             # Optimize
             if ni - last_opt_step >= accumulate:
@@ -339,14 +328,15 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         fi = fitness(np.array(results).reshape(1, -1))  # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
         if fi > best_fitness:
             best_fitness = fi
-        loggers.on_train_val_end(mloss, results, lr, epoch, best_fitness, fi, compress_rate)
+        loggers.on_train_val_end(mloss, results, lr, epoch, best_fitness, fi)
+        is_training_stuck = fitness_counter.step(fi)
 
         # Save model
         last, best = w / 'last.pt', w / 'best.pt'
         if (not nosave) or (final_epoch and not evolve):  # if save
             ckpt = {'epoch': epoch,
                     'best_fitness': best_fitness,
-                    'model': deepcopy(de_parallel(model)).half(),
+                    'state_dict': deepcopy(de_parallel(model)).half().state_dict(),
                     'optimizer': optimizer.state_dict(),
                     'fpgm_mask': None if not opt.fpgm else mask,
                     'wandb_id': loggers.wandb.wandb_run.id if loggers.wandb else None}
@@ -357,28 +347,6 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                 torch.save(ckpt, best)
             del ckpt
             loggers.on_model_save(last, epoch, final_epoch, best_fitness, fi)
-
-        # Apply FPGM prunning
-        if opt.fpgm:
-            do_prune = fpgm_counter.step(fi)
-            if do_prune:
-                # Save model
-                fpgm_pt_path = w / f'before-fpgm_ep{epoch}.pt'
-                ckpt = {'epoch': epoch,
-                        'best_fitness': best_fitness,
-                        'model': deepcopy(de_parallel(model)).half(),
-                        'optimizer': optimizer.state_dict(),
-                        'fpgm_mask': None if not opt.fpgm else mask,
-                        'wandb_id': loggers.wandb.wandb_run.id if loggers.wandb else None}
-                torch.save(ckpt, fpgm_pt_path)
-                del ckpt
-                print('fitness not increasing any more, trigger FPGM pruning..')
-                mask = prune(model, compress_rate=0.2, device=device)
-                fpgm_counter.max = 0
-                # check compress_rate
-                if opt.fpgm and mask is not None:
-                    cut_model(model, mask)
-                    compress_rate = if_zero(model, mask)
 
         # Test mode
         if opt.test:

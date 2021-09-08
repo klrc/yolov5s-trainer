@@ -1,5 +1,5 @@
 from _utils.models import Xyolov5s
-from _utils.melt2 import melt
+from melt3 import melt
 import torch
 
 if __name__ == '__main__':
@@ -7,7 +7,7 @@ if __name__ == '__main__':
     device = 'cpu'
     weights = 'runs/release/last.pt'
 
-    # Model
+    # load model
     nc = 6
     model = Xyolov5s(nc=6).to(device)  # create
     if weights.endswith('.pt'):
@@ -23,19 +23,22 @@ if __name__ == '__main__':
         #             new_csd[k] = csd[k]
         #     csd = new_csd
         model.load_state_dict(csd, strict=False)  # load
+    # for layer in model.modules():
+    #     if type(layer) == torch.nn.BatchNorm2d:
+    #         layer.bias.data *= 0
+    model.dsp()
 
+    # forward with random input
     x = torch.rand(4, 3, 224, 224)
-
-    model.eval().fuse().dsp()
-    # model.detect.train()
-
-    y = model(x)
-    _y = melt(model)(x)
+    with torch.no_grad():
+        model.eval()
+        y = model(x)
+        _y = melt(model)(x)
     
-    for y1, y2 in zip(y, _y):
-        print(y1.shape, y2.shape)
-        float_ratio = ((y1 - y2)/y1).abs().max().item()
-        print(f'output error: {float_ratio:.16f}')
+    # check results
+    for i, (y1, y2) in enumerate(zip(y, _y)):
+        float_ratio = ((y1 - y2)/y1).abs().mean().item()
+        print(f'output{i} error: {float_ratio:.16f}')
         # assert float_ratio < 1e-4
-        print()
+
 

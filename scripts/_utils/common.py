@@ -40,7 +40,6 @@ class Res(nn.Module):
             hidden = in_channels
         self.cv1 = Conv(in_channels, hidden, 1, 1)
         self.cv2 = Conv(hidden, in_channels, 3, 1)
-        self.cv2.conv.no_fpgm = True
 
     def forward(self, x):
         return x + self.cv2(self.cv1(x))
@@ -57,7 +56,6 @@ class C3(nn.Module):
         self.cv3 = Conv(2 * hidden, out_channels, 1, 1)
         if shortcut:
             self.m = nn.Sequential(*[Res(hidden, hidden) for _ in range(repeats)])
-            self.cv1.conv.no_fpgm = True
         else:
             self.m = nn.Sequential(*[Bottleneck(hidden, hidden) for _ in range(repeats)])
 
@@ -71,7 +69,6 @@ class Focus(nn.Module):
         super().__init__()
         self.focus = self._make_layer(in_channels)
         self.conv = Conv(in_channels*4, out_channels, 3, 1)
-        self.focus.no_fpgm = True
 
     def _make_layer(self, c1):
         conv = torch.nn.Conv2d(c1,  c1*4, 2, 2, bias=False)
@@ -122,8 +119,6 @@ class Detect(nn.Module):
         self.register_buffer('anchors', a)  # shape(nl,na,2)
         self.register_buffer('anchor_grid', a.clone().view(self.nl, 1, -1, 1, 1, 2))  # shape(nl,1,na,1,1,2)
         self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch)  # output conv
-        for x in self.m:
-            x.no_fpgm = True
 
     @staticmethod
     def _make_grid(nx=20, ny=20):
