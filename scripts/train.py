@@ -201,7 +201,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                 f'Starting training for {epochs} epochs...')
 
     # early-stop counter initialization
-    fitness_counter = Counter(patience=10)
+    fitness_counter = Counter(patience=5)
     is_training_stuck = False
 
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
@@ -413,6 +413,7 @@ def fpgm_run():
         'weights': 'prototype/ancient.pt',
         'imgsz': 416,
         'batch-size': 32,
+        'hyp': 'data/hyps/hyp.finetune.yaml',
     }
     next_gen_seed = run(**options)
     while next_gen_seed is not None:

@@ -1,6 +1,5 @@
 import torch
-from _utils.models import Xyolov5s
-from melt3 import melt
+from _utils.models import load_model
 
 
 def export_onnx(model, img, f, opset):
@@ -39,36 +38,12 @@ def run(model, output_path):
 if __name__ == '__main__':
 
     device = 'cpu'
-    weights = 'runs/train/exp67/weights/last.pt'
+    weights = 'runs/train/exp104/weights/last.pt'
 
     # Model
     nc = 6
-    model = Xyolov5s(nc=6).to(device)  # create
-    if weights.endswith('.pt'):
-        ckpt = torch.load(weights, map_location=device)  # load checkpoint
-        if 'model' in ckpt:
-            csd = ckpt['model'].float().state_dict()  # checkpoint state_dict as FP32
-        else:
-            csd = ckpt
-        # if nc != 80:
-        #     new_csd = model.state_dict()
-        #     for k in csd.keys():
-        #         if 'detect.m' not in k:
-        #             new_csd[k] = csd[k]
-        #     csd = new_csd
-        model.load_state_dict(csd, strict=False)  # load
-
+    model, _, _ = load_model(weights, device, nc=6)
     x = torch.rand(4, 3, 224, 224)
 
-    model.eval().dsp()
-    # print(model.detect.anchors)
-    # model.detect.train()
-    y = model(x)
-
-    model = melt(model)
-    _y = model(x)
-
-    for yi, _yi in zip(y, _y):
-        print(((yi-_yi)/yi).abs().max())
-
-    run(model.fuse(), 'runs/release/yolov5s.onnx')
+    model.eval().fuse().dsp()
+    run(model, 'runs/release/yolov5s-e104.onnx')

@@ -434,6 +434,9 @@ def find_dead_channels(model, clusters, mode, compress_rate=0.1, blacklist=[]):
                 dead_channels = zeros.bool()
             else:
                 raise NotImplementedError
+            # make sure no branch is completely removed
+            if torch.count_nonzero(dead_channels) == dead_channels.size(0):
+                dead_channels = zeros.bool()
             infected[(lid, 'out')] = dead_channels
     # strict searching of dead channels
     infected = broadcast_infection(clusters, infected)
