@@ -201,7 +201,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                 f'Starting training for {epochs} epochs...')
 
     # early-stop counter initialization
-    fitness_counter = Counter(patience=5)
+    fitness_counter = Counter(patience=10)
     is_training_stuck = False
 
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
@@ -409,8 +409,8 @@ def run(**kwargs):
 
 def fpgm_run():
     options = {
-        'data': 'coco-s.yaml',
-        'weights': 'prototype/ancient.pt',
+        'data': 'coco-l.yaml',
+        'weights': 'runs/train/exp91/weights/last.pt',
         'imgsz': 416,
         'batch-size': 32,
         'hyp': 'data/hyps/hyp.finetune.yaml',

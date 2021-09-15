@@ -4,6 +4,7 @@ Usage:
     $ python path/to/val.py --data coco128.yaml --weights yolov5s.pt --img 640
 """
 
+import json
 from _utils.loggers import Loggers
 from _utils.torch_utils import select_device, time_sync
 from _utils.plots import plot_images, output_to_target, plot_study_txt
@@ -111,7 +112,7 @@ def run(data,
         (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
 
         # Load model
-        model, _, _ = load_model(weights, device)
+        model, _, _ = load_model(weights, device, nc)
         model = model.float().fuse().eval().to(device)
         gs = 32  # grid size (max stride)
         imgsz = check_img_size(imgsz, s=32)  # check image size
@@ -369,6 +370,20 @@ def main(opt):
         plot_study_txt(x=x)  # plot
 
 
+# def tmp_run():
+# # e28 - e45
+# # e87 - 104
+#     for i in range(87, 105):
+#         options = {
+#             'data': 'data/coco-s.yaml',
+#             'weights': f'runs/train/exp{i}/weights/last.pt',
+#             'imgsz': 416,
+#             'batch_size': 32,
+#         }
+#         results = run(**options)
+
+
 if __name__ == "__main__":
     opt = parse_opt()
     main(opt)
+    # tmp_run()

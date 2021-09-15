@@ -136,7 +136,7 @@ def prune_func(cocox, __dist, dataset='train2017'):
 
     print('pruning coco dataset..')
 
-    # ark = []
+    ark = []
     # bg_ark = []
     coco_p1_cid = {name: i for i, name in enumerate(['person', 'bicycle', 'car', 'motorcycle', 'bus', 'truck'])}
 
@@ -153,10 +153,10 @@ def prune_func(cocox, __dist, dataset='train2017'):
 
         # if len(anno_ark) == 0:
         #     bg_ark.append(m)
-        # elif num_human/len(anno_ark) > 0.8:
-        #     continue
-        # else:
-        #     ark.append(m)
+        if len(anno_ark) > 0 and num_human/len(anno_ark) > 0.8:
+            continue
+        else:
+            ark.append(m)
 
     # print(f'{len(ark)} target images, {len(bg_ark)} background images..')
     # bg_rate = 0.8
@@ -164,7 +164,7 @@ def prune_func(cocox, __dist, dataset='train2017'):
     # bg_ark = random.choices(bg_ark, k=int(bg_size))
     # ark.extend(bg_ark)
 
-    # cocox.data[dataset] = ark
+    cocox.data[dataset] = ark
 
 
 if __name__ == "__main__":
@@ -179,4 +179,4 @@ if __name__ == "__main__":
     __newsize = sum([len(x) for x in dataset.data.values()])
     print(f"{__newsize/__rawsize:.2%}({__newsize}/{__rawsize}) data preserved")
 
-    export(dataset, '../datasets/coco-s')
+    export(dataset, '../datasets/coco-l')

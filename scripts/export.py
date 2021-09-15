@@ -38,7 +38,7 @@ def run(model, output_path):
 if __name__ == '__main__':
 
     device = 'cpu'
-    weights = 'runs/train/exp104/weights/last.pt'
+    weights = 'runs/train/exp106/weights/last.pt'
 
     # Model
     nc = 6
@@ -46,4 +46,4 @@ if __name__ == '__main__':
     x = torch.rand(4, 3, 224, 224)
 
     model.eval().fuse().dsp()
-    run(model, 'runs/release/yolov5s-e104.onnx')
+    run(model, 'runs/release/yolov5s-e106.onnx')
