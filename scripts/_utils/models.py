@@ -165,7 +165,7 @@ def _squeeze_layers(ll, fm, state_dict):
     return
 
 
-def load_model(weights, device, nc):
+def load_model(weights, device, nc) -> Xyolov5s:
     # Model
     model = Xyolov5s(nc=nc).to(device)  # create
     if weights.endswith('.pt'):
@@ -192,3 +192,9 @@ def load_model(weights, device, nc):
             print(f'freezing {k}')
             v.requires_grad = False
     return model, ckpt, csd
+
+
+
+if __name__ == '__main__':
+    model = load_model('/Volumes/ASM236X NVM/yolov5s-e106.pt', 'cpu', 6)[0]
+    print(model.detect.anchors)
