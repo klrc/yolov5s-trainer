@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from .common import Focus, Conv, C3, SPP, Detect
+from common import Focus, Conv, C3, SPP, Detect
 
 
 def fuse_conv_and_bn(conv, bn):
@@ -178,6 +178,19 @@ def load_model(weights, device, nc) -> Xyolov5s:
             csd = ckpt['state_dict']
         else:
             csd = ckpt
+        # replace detection head for new nc
+        ckpt_nc = 0
+        detectors = []
+        for k, v in csd.items():
+            if 'detect.m' in k:
+                detectors.append(k)
+                ckpt_nc = v.size(0)//3 - 5
+                if ckpt_nc != nc:
+                    if '.weight' in k:
+                        ic = v.size(1)
+                        csd[k] = model.state_dict()[k][:, :ic, ...]
+                    else:
+                        csd[k] = model.state_dict()[k]
         model.squeeze_loader(csd)
         model.to(device)
     # Freeze
@@ -196,5 +209,7 @@ def load_model(weights, device, nc) -> Xyolov5s:
 
 
 if __name__ == '__main__':
-    model = load_model('/Volumes/ASM236X NVM/yolov5s-e106.pt', 'cpu', 6)[0]
+    model = load_model('/Volumes/ASM236X NVM/yolov5s-e106.pt', 'cpu', 80)[0]
     print(model.detect.anchors)
+    x = torch.rand(4,3,224,224)
+    model(x)
